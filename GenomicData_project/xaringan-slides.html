@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>RaukR 2021</title>
+    <meta charset="utf-8" />
+    <script src="libs/header-attrs/header-attrs.js"></script>
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# RaukR 2021
+## Genomic Data Project
+### 2021/06/24
+
+---
+
+
+class: center, middle
+
+# Group Member
+Marika Oksanen
+
+Mónica Angulo-Bedoya
+
+Astradeni Efthymiadou
+
+Philip Dusart
+
+Zhuang Liu
+
+
+
+Advisor: Nina Norgren
+
+---
+
+# Work pipeline
+
+* Read the VCF file as a tibble
+
+* Extract the sequencing info
+
+* Extract and process the population info
+
+* Draw a map of the distribution of samples
+
+---
+
+background-image: url("libs/img/tenor.gif")
+
+class: center, bottom
+
+# Let's see!
+
+Image source: [Tenor](https://tenor.com/view/together-forever-besties-gif-18487587)
+
+---
+# 1. Read the VCF file as a tibble
+
+
+```r
+source("project_Functions.R")
+library(tidyverse)
+library(vroom)
+chr22vcf &lt;- readRDS("Data/chr22vcf.rds")
+colnames(chr22vcf) &lt;- c("chr", "pos", "id", "ref", "alt", "qual", 
+                        "filter", "info", "format", paste0("sm", 1:2504))
+chr22vcf[1:10,1:15]
+```
+
+```
+## # A tibble: 10 x 15
+##    chr       pos id    ref   alt    qual filter info    format sm1   sm2   sm3  
+##    &lt;chr&gt;   &lt;int&gt; &lt;chr&gt; &lt;chr&gt; &lt;chr&gt; &lt;dbl&gt; &lt;chr&gt;  &lt;chr&gt;   &lt;chr&gt;  &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;
+##  1 22     1.61e7 .     G     A       100 PASS   AC=3;A… GT     0|0   0|0   0|0  
+##  2 22     1.61e7 .     C     T       100 PASS   AC=2;A… GT     0|0   0|0   0|0  
+##  3 22     1.61e7 .     C     T       100 PASS   AC=10;… GT     0|0   0|0   0|0  
+##  4 22     1.61e7 .     G     A       100 PASS   AC=122… GT     0|0   0|0   0|0  
+##  5 22     1.61e7 .     G     C       100 PASS   AC=1;A… GT     0|0   0|0   0|0  
+##  6 22     1.61e7 .     G     A       100 PASS   AC=1;A… GT     0|0   0|0   0|0  
+##  7 22     1.61e7 .     G     A       100 PASS   AC=167… GT     0|0   0|0   0|0  
+##  8 22     1.61e7 .     T     A       100 PASS   AC=1;A… GT     0|0   0|0   0|0  
+##  9 22     1.61e7 .     C     T       100 PASS   AC=1;A… GT     0|0   0|0   0|0  
+## 10 22     1.61e7 .     G     A       100 PASS   AC=1;A… GT     0|0   0|0   0|0  
+## # … with 3 more variables: sm4 &lt;chr&gt;, sm5 &lt;chr&gt;, sm6 &lt;chr&gt;
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Make a self-function
+
+```r
+# This function is to separate the "specific" info from the column
+info_extract &lt;- function(data = NULL, info = NULL){
+  #split the string
+  tmp_a &lt;- data %&gt;% str_split(., pattern = ";") %&gt;% unlist()
+  tmp_b &lt;- lapply(tmp_a, FUN = function(x){
+    return(x %&gt;% str_split(., pattern = "=") %&gt;% unlist())
+  })
+  tmp_c &lt;- do.call('rbind', tmp_b) %&gt;% t() %&gt;% as.data.frame()
+  colnames(tmp_c) &lt;- tmp_c[1,]
+  tmp_c &lt;- tmp_c[-1,]
+  return(tmp_c[info])
+}
+# Usage example
+#info_extract(data = chr22vcf$info[15], info = "VT")
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Extract the SNP info
+
+```r
+# extract the info using self-written function, like the VT (Variant Type) is the type of SNP or INDEL
+vcf_info_VT &lt;- sapply(chr22vcf$info, FUN = function(x) info_extract(data = x, info = "VT"))
+
+vcf_info_VT &lt;- do.call("rbind", vcf_info_VT) %&gt;% as_tibble()
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Plot the number of different types of variants
+
+```r
+require(ggbreak)
+vt_plot &lt;- table(vcf_info_VT) %&gt;% as_tibble() %&gt;% 
+  rename(VT = vcf_info_VT) %&gt;% 
+  mutate(VT=parse_factor(VT, levels = c("SNP", "INDEL", "SNP,INDEL", "SV"))) %&gt;%
+  ggplot(., aes(x=VT, y=n, color = VT, fill=VT)) +
+  geom_bar(stat="identity") +
+  scale_color_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  scale_fill_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  geom_text(aes(label=n), vjust=1.6, color="black", size=4) + 
+  labs(x="", y="Frequency", title = "Variant Numbers") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_y_break(c(20, 700), scales=0.5) +
+  scale_y_break(c(740,19000), scales=1)
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Plot the number of different types of variants
+
+```r
+vt_plot
+```
+
+&lt;img src="xaringan-slides_files/figure-html/unnamed-chunk-5-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+# 3. Extract and process the population info 
+
+* Extract the info of population
+
+```r
+ori &lt;- readRDS("Data/ALL.chr22.origin.rds")
+#Just need the sample information
+sm_info &lt;- ori[1,] %&gt;% t() %&gt;% as_tibble() %&gt;% slice(-c(1:9))
+colnames(sm_info) &lt;- "Sample_name"
+all_sminfo &lt;- vroom("Data/igsr_samples.tsv")
+colnames(all_sminfo) &lt;- gsub(" ","_",colnames(all_sminfo))
+#Get the sample info what we need for our project
+sm_info &lt;- sm_info %&gt;% 
+  left_join(., all_sminfo, by=c("Sample_name" = "Sample_name"))
+#delete the temporary files
+rm(ori, all_sminfo)
+```
+
+---
+
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+
+```r
+pop_loc &lt;- vroom("Data/igsr_populations.tsv")
+colnames(pop_loc) &lt;- gsub(" ","_",colnames(pop_loc))
+
+#add the population latitude and longitude
+uni_pop_n &lt;- str_split(sm_info[["Population_name"]], pattern = ",") %&gt;% unlist() %&gt;% sort() %&gt;% table() %&gt;% as_tibble()
+colnames(uni_pop_n)[1] &lt;- "Population_name"
+uni_pop &lt;- str_split(sm_info[["Population_name"]], pattern = ",") %&gt;% unlist() %&gt;% unique() %&gt;% sort()
+sm_loc &lt;- pop_loc %&gt;% select(3:6, 9) %&gt;% 
+  filter(Population_name %in% uni_pop) %&gt;% 
+  left_join(., uni_pop_n, by=c("Population_name" = "Population_name")) %&gt;% 
+  distinct(Population_name, n, .keep_all = TRUE)
+```
+
+---
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+
+```r
+require(ggplot2)
+require(maps)
+require(ggrepel)
+#Get the info of world map
+world &lt;- map_data("world")
+map_plot &lt;- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group, fill=group),  alpha=0.3, show.legend = FALSE) + #fill="grey",
+  geom_point(data=sm_loc, aes(x=Population_longitude, y=Population_latitude, color=Population_name, size=n), alpha=1, show.legend = FALSE) +
+  scale_size_continuous(range = c(1,4), breaks = c(seq(20,120, by=20))) +
+  theme_void() + 
+  labs(caption = "RaukR 2021 Genomic Data Project: Population Distribution") +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA), 
+    legend.background = element_rect(fill = "white", color = NA)
+  ) +
+  geom_text_repel(data = sm_loc, mapping = aes(x=Population_longitude, y=Population_latitude, label=Population_name), 
+    nudge_x = .15,  box.padding = 0.5, nudge_y = 1.1, segment.curvature = 0.1, segment.ncp = 3, segment.angle = 20, max.overlaps = 20) 
+```
+
+---
+
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+
+```r
+map_plot
+```
+
+&lt;img src="xaringan-slides_files/figure-html/unnamed-chunk-9-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+class: center, middle
+
+# Thanks for your attention!
+
+Slides created via the R package [**xaringan**](https://github.com/yihui/xaringan).
+
+---
+
+background-image: url("libs/img/end.jpeg")
+
+class: center
+
+# See you in the future!
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"ratio": "16:9"
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

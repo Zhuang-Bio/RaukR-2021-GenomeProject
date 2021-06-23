@@ -1,0 +1,219 @@
+---
+title: "RaukR 2021"
+subtitle: "Genomic Data Project"
+date: "2021/06/24"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      ratio: '16:9'
+---
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+```
+class: center, middle
+
+# Group Member
+Marika Oksanen
+
+Mónica Angulo-Bedoya
+
+Astradeni Efthymiadou
+
+Philip Dusart
+
+Zhuang Liu
+
+
+
+Advisor: Nina Norgren
+
+---
+
+# Work pipeline
+
+* Read the VCF file as a tibble
+
+* Extract the sequencing info
+
+* Extract and process the population info
+
+* Draw a map of the distribution of samples
+
+---
+
+background-image: url("libs/img/tenor.gif")
+
+class: center, bottom
+
+# Let's see!
+
+Image source: [Tenor](https://tenor.com/view/together-forever-besties-gif-18487587)
+
+---
+# 1. Read the VCF file as a tibble
+
+```{r eval=TRUE, tidy=FALSE, warning=FALSE, message=FALSE}
+source("project_Functions.R")
+library(tidyverse)
+library(vroom)
+chr22vcf <- readRDS("Data/chr22vcf.rds")
+colnames(chr22vcf) <- c("chr", "pos", "id", "ref", "alt", "qual", 
+                        "filter", "info", "format", paste0("sm", 1:2504))
+chr22vcf[1:10,1:15]
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Make a self-function
+```{r eval=FALSE, tidy=FALSE}
+# This function is to separate the "specific" info from the column
+info_extract <- function(data = NULL, info = NULL){
+  #split the string
+  tmp_a <- data %>% str_split(., pattern = ";") %>% unlist()
+  tmp_b <- lapply(tmp_a, FUN = function(x){
+    return(x %>% str_split(., pattern = "=") %>% unlist())
+  })
+  tmp_c <- do.call('rbind', tmp_b) %>% t() %>% as.data.frame()
+  colnames(tmp_c) <- tmp_c[1,]
+  tmp_c <- tmp_c[-1,]
+  return(tmp_c[info])
+}
+# Usage example
+#info_extract(data = chr22vcf$info[15], info = "VT")
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Extract the SNP info
+```{r eval=TRUE, tidy=FALSE, message=F, warning=F}
+# extract the info using self-written function, like the VT (Variant Type) is the type of SNP or INDEL
+vcf_info_VT <- sapply(chr22vcf$info, FUN = function(x) info_extract(data = x, info = "VT"))
+
+vcf_info_VT <- do.call("rbind", vcf_info_VT) %>% as_tibble()
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Plot the number of different types of variants
+```{r fig.width=12, fig.height=8, warning=FALSE, message=FALSE}
+require(ggbreak)
+vt_plot <- table(vcf_info_VT) %>% as_tibble() %>% 
+  rename(VT = vcf_info_VT) %>% 
+  mutate(VT=parse_factor(VT, levels = c("SNP", "INDEL", "SNP,INDEL", "SV"))) %>%
+  ggplot(., aes(x=VT, y=n, color = VT, fill=VT)) +
+  geom_bar(stat="identity") +
+  scale_color_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  scale_fill_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  geom_text(aes(label=n), vjust=1.6, color="black", size=4) + 
+  labs(x="", y="Frequency", title = "Variant Numbers") +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_y_break(c(20, 700), scales=0.5) +
+  scale_y_break(c(740,19000), scales=1)
+```
+
+---
+
+# 2. Extract the sequencing info
+
+* Plot the number of different types of variants
+```{r fig.width=8, fig.height=6, fig.align = 'center'}
+vt_plot
+```
+
+---
+
+# 3. Extract and process the population info 
+
+* Extract the info of population
+```{r message=F, warning=F}
+ori <- readRDS("Data/ALL.chr22.origin.rds")
+#Just need the sample information
+sm_info <- ori[1,] %>% t() %>% as_tibble() %>% slice(-c(1:9))
+colnames(sm_info) <- "Sample_name"
+all_sminfo <- vroom("Data/igsr_samples.tsv")
+colnames(all_sminfo) <- gsub(" ","_",colnames(all_sminfo))
+#Get the sample info what we need for our project
+sm_info <- sm_info %>% 
+  left_join(., all_sminfo, by=c("Sample_name" = "Sample_name"))
+#delete the temporary files
+rm(ori, all_sminfo)
+```
+
+---
+
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+```{r echo=TRUE, message=F, warning=F}
+pop_loc <- vroom("Data/igsr_populations.tsv")
+colnames(pop_loc) <- gsub(" ","_",colnames(pop_loc))
+
+#add the population latitude and longitude
+uni_pop_n <- str_split(sm_info[["Population_name"]], pattern = ",") %>% unlist() %>% sort() %>% table() %>% as_tibble()
+colnames(uni_pop_n)[1] <- "Population_name"
+uni_pop <- str_split(sm_info[["Population_name"]], pattern = ",") %>% unlist() %>% unique() %>% sort()
+sm_loc <- pop_loc %>% select(3:6, 9) %>% 
+  filter(Population_name %in% uni_pop) %>% 
+  left_join(., uni_pop_n, by=c("Population_name" = "Population_name")) %>% 
+  distinct(Population_name, n, .keep_all = TRUE)
+```
+
+---
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+```{r echo=TRUE, message=F, warning=F}
+require(ggplot2)
+require(maps)
+require(ggrepel)
+#Get the info of world map
+world <- map_data("world")
+map_plot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group, fill=group),  alpha=0.3, show.legend = FALSE) + #fill="grey",
+  geom_point(data=sm_loc, aes(x=Population_longitude, y=Population_latitude, color=Population_name, size=n), alpha=1, show.legend = FALSE) +
+  scale_size_continuous(range = c(1,4), breaks = c(seq(20,120, by=20))) +
+  theme_void() + 
+  labs(caption = "RaukR 2021 Genomic Data Project: Population Distribution") +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA), 
+    legend.background = element_rect(fill = "white", color = NA)
+  ) +
+  geom_text_repel(data = sm_loc, mapping = aes(x=Population_longitude, y=Population_latitude, label=Population_name), 
+    nudge_x = .15,  box.padding = 0.5, nudge_y = 1.1, segment.curvature = 0.1, segment.ncp = 3, segment.angle = 20, max.overlaps = 20) 
+```
+
+---
+
+# 4. Draw a map of the distribution of samples
+
+* Draw the map of population distribution
+```{r fig.width=12, fig.height=7, fig.align = 'center'}
+map_plot
+```
+
+---
+
+class: center, middle
+
+# Thanks for your attention!
+
+Slides created via the R package [**xaringan**](https://github.com/yihui/xaringan).
+
+---
+
+background-image: url("libs/img/end.jpeg")
+
+class: center
+
+# See you in the future!
